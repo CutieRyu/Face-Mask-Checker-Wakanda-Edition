@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Face Mask Detector</title>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #080c10;
+      --panel:     #0d1520;
+      --border:    #1a2d42;
+      --accent:    #00e5ff;
+      --accent2:   #00ff9d;
+      --danger:    #ff3c5a;
+      --text:      #c8dde8;
+      --dim:       #4a6070;
+      --mono:      'Share Tech Mono', monospace;
+      --sans:      'Exo 2', sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+      overflow-x: hidden;
+    }
+
+    /* Animated grid background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,229,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,229,255,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── HEADER ───────────────────────────────────────── */
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .badge {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      padding: 3px 10px;
+      margin-bottom: 0.8rem;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: clamp(1.8rem, 5vw, 2.8rem);
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      color: #fff;
+    }
+
+    h1 span { color: var(--accent); }
+
+    .subtitle {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--dim);
+      margin-top: 0.5rem;
+      letter-spacing: 0.1em;
+    }
+
+    /* ── MAIN LAYOUT ──────────────────────────────────── */
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 1.5rem;
+      width: 100%;
+      max-width: 960px;
+      position: relative;
+      z-index: 1;
+    }
+
+    @media (max-width: 700px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+
+    /* ── CAMERA PANEL ─────────────────────────────────── */
+    .cam-panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .cam-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--dim);
+      letter-spacing: 0.1em;
+    }
+
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--dim);
+    }
+    .dot.live { background: var(--accent2); animation: pulse 1.5s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,255,157,0.4); }
+      50%       { opacity: 0.7; box-shadow: 0 0 0 6px rgba(0,255,157,0); }
+    }
+
+    .video-wrap {
+      position: relative;
+      background: #000;
+      aspect-ratio: 4/3;
+    }
+
+    #webcam {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transform: scaleX(-1); /* Mirror for natural selfie feel */
+    }
+
+    /* Scan line overlay */
+    .scanline {
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.08) 2px,
+        rgba(0,0,0,0.08) 4px
+      );
+      pointer-events: none;
+    }
+
+    /* Corner brackets */
+    .bracket {
+      position: absolute;
+      width: 30px; height: 30px;
+      border-color: var(--accent);
+      border-style: solid;
+      opacity: 0.7;
+    }
+    .bracket.tl { top: 12px; left: 12px;  border-width: 2px 0 0 2px; }
+    .bracket.tr { top: 12px; right: 12px; border-width: 2px 2px 0 0; }
+    .bracket.bl { bottom: 12px; left: 12px;  border-width: 0 0 2px 2px; }
+    .bracket.br { bottom: 12px; right: 12px; border-width: 0 2px 2px 0; }
+
+    /* Detection overlay box */
+    #detection-box {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 180px; height: 220px;
+      border: 2px solid var(--accent);
+      border-radius: 4px;
+      opacity: 0;
+      transition: border-color 0.3s, opacity 0.3s;
+    }
+    #detection-box.visible { opacity: 1; }
+    #detection-box.mask    { border-color: var(--accent2); }
+    #detection-box.nomask  { border-color: var(--danger); }
+
+    /* Label on box */
+    #box-label {
+      position: absolute;
+      bottom: -32px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      white-space: nowrap;
+      padding: 3px 10px;
+      border-radius: 2px;
+      background: var(--accent);
+      color: #000;
+      font-weight: bold;
+      letter-spacing: 0.1em;
+    }
+    #box-label.nomask { background: var(--danger); color: #fff; }
+
+    /* Idle overlay */
+    #idle-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(8,12,16,0.85);
+      gap: 12px;
+    }
+    .cam-icon {
+      font-size: 3rem;
+      opacity: 0.4;
+    }
+    #idle-overlay p {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--dim);
+      letter-spacing: 0.1em;
+    }
+
+    /* ── CONTROLS ─────────────────────────────────────── */
+    .cam-controls {
+      display: flex;
+      gap: 8px;
+      padding: 12px 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .btn {
+      flex: 1;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #000;
+      font-weight: 600;
+    }
+    .btn.primary:hover { background: #00c8e0; }
+    .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    /* ── SIDE PANEL ───────────────────────────────────── */
+    .side-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .info-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 16px;
+    }
+
+    .card-label {
+      font-family: var(--mono);
+      font-size: 0.6rem;
+      letter-spacing: 0.2em;
+      color: var(--dim);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    /* Result display */
+    #result-label {
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: 2.2rem;
+      letter-spacing: -0.02em;
+      color: var(--dim);
+      transition: color 0.3s;
+      line-height: 1;
+    }
+    #result-label.mask   { color: var(--accent2); }
+    #result-label.nomask { color: var(--danger); }
+
+    #result-conf {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--dim);
+      margin-top: 6px;
+    }
+
+    /* Confidence bar */
+    .bar-wrap {
+      margin-top: 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      height: 6px;
+      overflow: hidden;
+    }
+    #conf-bar {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      transition: width 0.4s ease, background 0.3s;
+    }
+    #conf-bar.mask   { background: var(--accent2); }
+    #conf-bar.nomask { background: var(--danger); }
+
+    /* Stats */
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 0.7rem;
+    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-key  { color: var(--dim); }
+    .stat-val  { color: var(--accent); }
+
+    /* Log */
+    #log {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      color: var(--dim);
+      line-height: 1.8;
+      max-height: 130px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+    .log-mask   { color: var(--accent2); }
+    .log-nomask { color: var(--danger); }
+    .log-sys    { color: var(--accent); opacity: 0.7; }
+
+    /* Canvas (hidden, used for frame capture) */
+    #canvas { display: none; }
+
+    /* Status bar */
+    .status-bar {
+      width: 100%;
+      max-width: 960px;
+      margin-top: 1rem;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      color: var(--dim);
+      letter-spacing: 0.1em;
+      display: flex;
+      justify-content: space-between;
+      position: relative;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="badge">CNN · Real-Time Detection</div>
+    <h1>Face <span>Mask</span> Detector</h1>
+    <p class="subtitle">CUSTOM CNN · IMAGE CLASSIFICATION · WEB DEPLOYMENT</p>
+  </header>
+
+  <div class="layout">
+
+    <!-- ── CAMERA PANEL ── -->
+    <div class="cam-panel">
+      <div class="cam-header">
+        <div class="dot" id="live-dot"></div>
+        <span id="cam-status">CAMERA OFFLINE</span>
+      </div>
+
+      <div class="video-wrap">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        <div class="scanline"></div>
+        <div class="bracket tl"></div>
+        <div class="bracket tr"></div>
+        <div class="bracket bl"></div>
+        <div class="bracket br"></div>
+        <div id="detection-box">
+          <span id="box-label">—</span>
+        </div>
+        <div id="idle-overlay">
+          <div class="cam-icon">📷</div>
+          <p>CLICK "START CAMERA" TO BEGIN</p>
+        </div>
+      </div>
+
+      <div class="cam-controls">
+        <button class="btn primary" id="btn-start"  onclick="startCamera()">Start Camera</button>
+        <button class="btn"         id="btn-detect" onclick="toggleDetection()" disabled>Detect</button>
+        <button class="btn"         id="btn-stop"   onclick="stopCamera()"      disabled>Stop</button>
+      </div>
+    </div>
+
+    <!-- ── SIDE PANEL ── -->
+    <div class="side-panel">
+
+      <!-- Result -->
+      <div class="info-card">
+        <div class="card-label">Detection Result</div>
+        <div id="result-label">—</div>
+        <div id="result-conf">Confidence: —</div>
+        <div class="bar-wrap"><div id="conf-bar"></div></div>
+      </div>
+
+      <!-- Stats -->
+      <div class="info-card">
+        <div class="card-label">Session Stats</div>
+        <div class="stat-row">
+          <span class="stat-key">Frames processed</span>
+          <span class="stat-val" id="stat-frames">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-key">Mask detected</span>
+          <span class="stat-val" id="stat-mask">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-key">No mask</span>
+          <span class="stat-val" id="stat-nomask">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-key">Avg confidence</span>
+          <span class="stat-val" id="stat-avgconf">—</span>
+        </div>
+      </div>
+
+      <!-- Log -->
+      <div class="info-card" style="flex:1">
+        <div class="card-label">Detection Log</div>
+        <div id="log"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <span>FLASK API · localhost:5000</span>
+    <span id="fps-display">FPS: —</span>
+    <span>MODEL: mask_detector.h5</span>
+  </div>
+
+  <script>
+    // ── STATE ──────────────────────────────────────────────
+    let stream       = null;
+    let detecting    = false;
+    let intervalId   = null;
+    let frameCount   = 0;
+    let maskCount    = 0;
+    let noMaskCount  = 0;
+    let confTotal    = 0;
+    let lastTime     = Date.now();
+    let fpsFrames    = 0;
+
+    const INTERVAL_MS  = 500;   // Send a frame every 500ms
+    const API_ENDPOINT = "/predict";
+
+    // ── DOM REFS ───────────────────────────────────────────
+    const webcam      = document.getElementById("webcam");
+    const canvas      = document.getElementById("canvas");
+    const ctx         = canvas.getContext("2d");
+    const idleOverlay = document.getElementById("idle-overlay");
+    const liveDot     = document.getElementById("live-dot");
+    const camStatus   = document.getElementById("cam-status");
+    const detectionBox= document.getElementById("detection-box");
+    const boxLabel    = document.getElementById("box-label");
+    const resultLabel = document.getElementById("result-label");
+    const resultConf  = document.getElementById("result-conf");
+    const confBar     = document.getElementById("conf-bar");
+    const log         = document.getElementById("log");
+
+    // ── CAMERA ────────────────────────────────────────────
+    async function startCamera() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        webcam.srcObject = stream;
+        idleOverlay.style.display = "none";
+        liveDot.classList.add("live");
+        camStatus.textContent = "CAMERA ONLINE";
+        document.getElementById("btn-start").disabled  = true;
+        document.getElementById("btn-detect").disabled = false;
+        document.getElementById("btn-stop").disabled   = false;
+        addLog("sys", "Camera started.");
+      } catch (err) {
+        addLog("sys", "Camera error: " + err.message);
+        alert("Could not access webcam: " + err.message);
+      }
+    }
+
+    function stopCamera() {
+      if (detecting) toggleDetection();
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      webcam.srcObject   = null;
+      idleOverlay.style.display = "flex";
+      liveDot.classList.remove("live");
+      camStatus.textContent = "CAMERA OFFLINE";
+      document.getElementById("btn-start").disabled  = false;
+      document.getElementById("btn-detect").disabled = true;
+      document.getElementById("btn-stop").disabled   = true;
+      detectionBox.className = "";
+      addLog("sys", "Camera stopped.");
+    }
+
+    // ── DETECTION TOGGLE ──────────────────────────────────
+    function toggleDetection() {
+      detecting = !detecting;
+      const btn = document.getElementById("btn-detect");
+      if (detecting) {
+        btn.textContent = "Stop Detect";
+        btn.style.borderColor = "var(--danger)";
+        btn.style.color       = "var(--danger)";
+        intervalId = setInterval(captureAndPredict, INTERVAL_MS);
+        addLog("sys", "Detection started.");
+      } else {
+        btn.textContent = "Detect";
+        btn.style.borderColor = "";
+        btn.style.color       = "";
+        clearInterval(intervalId);
+        detectionBox.className = "";
+        addLog("sys", "Detection paused.");
+      }
+    }
+
+    // ── CAPTURE FRAME & PREDICT ───────────────────────────
+    async function captureAndPredict() {
+      if (!stream) return;
+
+      // Draw current video frame to hidden canvas
+      canvas.width  = webcam.videoWidth  || 640;
+      canvas.height = webcam.videoHeight || 480;
+      ctx.drawImage(webcam, 0, 0, canvas.width, canvas.height);
+
+      // Convert to base64 JPEG
+      const imageData = canvas.toDataURL("image/jpeg", 0.8);
+
+      try {
+        const res = await fetch(API_ENDPOINT, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ image: imageData })
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        updateUI(data);
+        updateStats(data);
+        updateFPS();
+
+      } catch (err) {
+        addLog("sys", "Error: " + err.message);
+      }
+    }
+
+    // ── UPDATE UI ─────────────────────────────────────────
+    function updateUI(data) {
+      const isMask = data.label === "Mask";
+      const cls    = isMask ? "mask" : "nomask";
+
+      // Result card
+      resultLabel.textContent = data.label;
+      resultLabel.className   = cls;
+      resultConf.textContent  = `Confidence: ${data.confidence}%`;
+      confBar.style.width     = `${data.confidence}%`;
+      confBar.className       = cls;
+
+      // Detection box
+      detectionBox.className = `visible ${cls}`;
+      boxLabel.textContent   = `${data.label} · ${data.confidence}%`;
+      boxLabel.className     = isMask ? "" : "nomask";
+
+      // Log
+      addLog(cls, `[${timestamp()}] ${data.label} — ${data.confidence}%`);
+    }
+
+    function updateStats(data) {
+      frameCount++;
+      confTotal += data.confidence;
+      if (data.label === "Mask") maskCount++;
+      else                        noMaskCount++;
+
+      document.getElementById("stat-frames").textContent  = frameCount;
+      document.getElementById("stat-mask").textContent    = maskCount;
+      document.getElementById("stat-nomask").textContent  = noMaskCount;
+      document.getElementById("stat-avgconf").textContent =
+        (confTotal / frameCount).toFixed(1) + "%";
+    }
+
+    function updateFPS() {
+      fpsFrames++;
+      const now     = Date.now();
+      const elapsed = (now - lastTime) / 1000;
+      if (elapsed >= 2) {
+        const fps = (fpsFrames / elapsed).toFixed(1);
+        document.getElementById("fps-display").textContent = `FPS: ${fps}`;
+        fpsFrames = 0;
+        lastTime  = now;
+      }
+    }
+
+    // ── LOG ───────────────────────────────────────────────
+    function addLog(type, msg) {
+      const div = document.createElement("div");
+      div.className = type === "sys" ? "log-sys"
+                    : type === "mask" ? "log-mask"
+                    : "log-nomask";
+      div.textContent = (type === "sys" ? "» " : "● ") + msg;
+      log.prepend(div);
+      // Keep max 30 log entries
+      while (log.children.length > 30) log.removeChild(log.lastChild);
+    }
+
+    function timestamp() {
+      return new Date().toTimeString().slice(0, 8);
+    }
+
+    // ── INIT ──────────────────────────────────────────────
+    addLog("sys", "System ready. Waiting for camera...");
+  </script>
+
+</body>
+</html>
